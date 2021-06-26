@@ -14,9 +14,7 @@ Mat DFTModule(Mat src[], bool shift);
 int main(int argc, char const *argv[])
 {
     Mat img, img2, img3;
-    img = imread("Lenna.png");
-
-    cvtColor(img, img, COLOR_BGR2GRAY);
+    img = imread("Lenna.png", IMREAD_GRAYSCALE);
 
     imshow("Img", img);
 

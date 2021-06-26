@@ -11,7 +11,6 @@
                 "${fileDirname}/${fileBasenameNoExtension}",
                 "-std=c++17",
                 "`pkg-config", "--cflags", "--libs", "opencv4`",
-                "-lfftw3",
             ],
             "options": {
                 "cwd": "${fileDirname}"
