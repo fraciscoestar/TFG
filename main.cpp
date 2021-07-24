@@ -4,17 +4,20 @@
 #include <opencv2/imgcodecs.hpp>
 #include <wiringPi.h>
 
+#define FILTER_HPF 0
+#define FILTER_HFE 1
+
 using namespace std;
 using namespace cv;
 
-void HFE(Mat& src, Mat& dst);
+void HPF(Mat& src, Mat& dst, uint8_t filterType);
 void FFTShift(const Mat& src, Mat &dst);
 void test();
 Mat DFTModule(Mat src[], bool shift);
 
 int main(int argc, char const *argv[])
 {
-    Mat img, img2, img3;
+    Mat img, img2, img3, img4;
     
     // Activate Lights ////////////////
     wiringPiSetup();
@@ -42,17 +45,22 @@ int main(int argc, char const *argv[])
     clahe->apply(img2, img2);
     ///////////////////////////////////
 
-    // HFE ////////////////////////////
-    HFE(img2, img3);
+    // HPF ////////////////////////////
+    HPF(img2, img3, FILTER_HPF);
     ///////////////////////////////////
 
-    // Deactivate Lights ////////////////
+    // HPF + HFE //////////////////////
+    HPF(img3, img4, FILTER_HFE);
+    ///////////////////////////////////
+
+    // Deactivate Lights //////////////
     digitalWrite(4, LOW);
     digitalWrite(5, LOW);
     ///////////////////////////////////
 
     imshow("CLAHE", img2);
-    imshow("HFE", img3);
+    imshow("HPF", img3);
+    imshow("HPF + HFE", img4);
 
     waitKey(0);
 
@@ -79,7 +87,7 @@ Mat DFTModule(Mat src[], bool shift)
     return magImg;
 }
 
-void HFE(Mat& src, Mat& dst)
+void HPF(Mat& src, Mat& dst, uint8_t filterType)
 {
     Mat padded; // Expande la imagen al tamaño óptimo
     int m = getOptimalDFTSize(src.rows);
@@ -97,28 +105,28 @@ void HFE(Mat& src, Mat& dst)
 
     /// FILTER
     Mat H = Mat::zeros(src.size(), CV_32F);
-    Mat H2 = Mat::zeros(src.size(), CV_32F);
     Mat filt = Mat::zeros(src.size(), CV_32F);
-    Mat HFE = complexImg.clone();
+    Mat HF = complexImg.clone();
 
-    float D0 = 40.0f, k1 = 0.5f, k2 = 0.75f;
-    float a = 10.9, b = -4;
+    float D0 = 40.0f;
+    float k1 = filterType ? 0.5f : -4;
+    float k2 = filterType ? 0.75f : 10.9;
+
+    // float a = 10.9, b = -4;
     
     for (int i = 0; i < H.cols; i++)
     {
         for (int j = 0; j < H.rows; j++)
         {
             H.at<float>(Point(i,j)) = 1.0 - exp( -(pow(i - H.cols / 2, 2) + pow(j - H.rows / 2, 2)) / (2 * pow(D0, 2)) );
-            H2.at<float>(Point(i,j)) = a*(1.0 - exp( -(pow(i - H.cols / 2, 2) + pow(j - H.rows / 2, 2)) / (2 * pow(D0, 2)))) + b;
         }
         
     }
 
-    //filt = k1 + k2*H;
-    filt = H2;
+    filt = k1 + k2*H;
 
-    FFTShift(HFE, HFE);
-    split(HFE, planes);
+    FFTShift(HF, HF);
+    split(HF, planes);
     for (int i = 0; i < filt.cols; i++)
     {
         for (int j = 0; j < filt.rows; j++)
