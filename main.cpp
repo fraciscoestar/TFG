@@ -2,6 +2,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <wiringPi.h>
 
 using namespace std;
 using namespace cv;
@@ -14,23 +15,44 @@ Mat DFTModule(Mat src[], bool shift);
 int main(int argc, char const *argv[])
 {
     Mat img, img2, img3;
-    img = imread("Lenna.png", IMREAD_GRAYSCALE);
+    
+    // Activate Lights ////////////////
+    wiringPiSetup();
+    pinMode(4, OUTPUT);
+    pinMode(5, OUTPUT);
 
-    imshow("Img", img);
+    digitalWrite(4, HIGH); //980nm
+    digitalWrite(5, HIGH); //850nm
+    ///////////////////////////////////
+
+    // Take image /////////////////////
+    // img = imread("Lenna.png", IMREAD_GRAYSCALE);
+    VideoCapture vc(0);
+    vc.read(img);
+    cvtColor(img, img, COLOR_BGR2GRAY);
+    Rect fingerRegion = Rect(255, 0, 465-255, img.rows);
+    img2 = img(fingerRegion);
+    imshow("Img", img2);
+    ///////////////////////////////////
 
     // CLAHE //////////////////////////
     Ptr<CLAHE> clahe = createCLAHE();
     clahe->setClipLimit(4);
 
-    clahe->apply(img, img);
+    clahe->apply(img2, img2);
     ///////////////////////////////////
 
     // HFE ////////////////////////////
-    HFE(img, img2);
+    HFE(img2, img3);
     ///////////////////////////////////
 
-    imshow("CLAHE", img);
-    imshow("HFE", img2);
+    // Deactivate Lights ////////////////
+    digitalWrite(4, LOW);
+    digitalWrite(5, LOW);
+    ///////////////////////////////////
+
+    imshow("CLAHE", img2);
+    imshow("HFE", img3);
 
     waitKey(0);
 
@@ -75,27 +97,31 @@ void HFE(Mat& src, Mat& dst)
 
     /// FILTER
     Mat H = Mat::zeros(src.size(), CV_32F);
+    Mat H2 = Mat::zeros(src.size(), CV_32F);
     Mat filt = Mat::zeros(src.size(), CV_32F);
     Mat HFE = complexImg.clone();
 
     float D0 = 40.0f, k1 = 0.5f, k2 = 0.75f;
+    float a = 10.9, b = -4;
     
     for (int i = 0; i < H.cols; i++)
     {
         for (int j = 0; j < H.rows; j++)
         {
             H.at<float>(Point(i,j)) = 1.0 - exp( -(pow(i - H.cols / 2, 2) + pow(j - H.rows / 2, 2)) / (2 * pow(D0, 2)) );
+            H2.at<float>(Point(i,j)) = a*(1.0 - exp( -(pow(i - H.cols / 2, 2) + pow(j - H.rows / 2, 2)) / (2 * pow(D0, 2)))) + b;
         }
         
     }
 
-    filt = k1 + k2*H;
+    //filt = k1 + k2*H;
+    filt = H2;
 
     FFTShift(HFE, HFE);
     split(HFE, planes);
-    for (int i = 0; i < H.cols; i++)
+    for (int i = 0; i < filt.cols; i++)
     {
-        for (int j = 0; j < H.rows; j++)
+        for (int j = 0; j < filt.rows; j++)
         {
             planes[0].at<float>(Point(i,j)) *= filt.at<float>(Point(i,j));
             planes[1].at<float>(Point(i,j)) *= filt.at<float>(Point(i,j));
