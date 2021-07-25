@@ -14,10 +14,20 @@ void HPF(Mat& src, Mat& dst, uint8_t filterType);
 void FFTShift(const Mat& src, Mat &dst);
 void test();
 Mat DFTModule(Mat src[], bool shift);
+void CGF(Mat &src, Mat &dst, float F, float sigma, float theta);
 
 int main(int argc, char const *argv[])
 {
     Mat img, img2, img3, img4;
+    int gamma_ = 10;
+    int F = 10, sigma = 30, theta = 0, lambda = 100;
+
+    namedWindow("Gamma bar");
+    createTrackbar("Gamma", "Gamma bar", &gamma_, 1000);
+    createTrackbar("F", "Gamma bar", &F, 100);
+    createTrackbar("Sigma", "Gamma bar", &sigma, 100);
+    createTrackbar("Theta", "Gamma bar", &theta, 1000);
+    createTrackbar("Lambda", "Gamma bar", &lambda, 1000);
     
     // Activate Lights ////////////////
     wiringPiSetup();
@@ -33,9 +43,14 @@ int main(int argc, char const *argv[])
     VideoCapture vc(0);
     vc.read(img);
     cvtColor(img, img, COLOR_BGR2GRAY);
-    Rect fingerRegion = Rect(255, 0, 465-255, img.rows);
+    Rect fingerRegion = Rect(255, 0, 465-255, img.rows-40);
     img2 = img(fingerRegion);
     imshow("Img", img2);
+    ///////////////////////////////////
+
+    // Deactivate Lights //////////////
+    digitalWrite(4, LOW);
+    digitalWrite(5, LOW);
     ///////////////////////////////////
 
     // CLAHE //////////////////////////
@@ -49,24 +64,54 @@ int main(int argc, char const *argv[])
     HPF(img2, img3, FILTER_HPF);
     ///////////////////////////////////
 
-    // HPF + HFE //////////////////////
-    HPF(img3, img4, FILTER_HFE);
-    ///////////////////////////////////
-
-    // Deactivate Lights //////////////
-    digitalWrite(4, LOW);
-    digitalWrite(5, LOW);
-    ///////////////////////////////////
-
     imshow("CLAHE", img2);
     imshow("HPF", img3);
-    imshow("HPF + HFE", img4);
 
-    waitKey(0);
+    
 
+    while(1)
+    {
+        //CGF(img3, img, F/10.0, sigma/10.0, 0);
+        Mat kernel = getGaborKernel(Size2d(21, 21), sigma/10.0, theta/100.0, lambda/100.0, gamma_/10.0);
+        filter2D(img3, img4, CV_8U, kernel);
+
+        imshow("Gabor filter", img4);
+        imshow("kernel", kernel);
+        waitKey(1);
+    }
     return 0;
 }
+ 
+void CGF(Mat &src, Mat &dst, float F, float sigma, float theta)
+{
+    float alpha = 1.0 / (2*M_PI*sigma);
+    float Fuv;
+    Mat g = Mat::zeros(src.size(), CV_32F);
+    Mat G[] = { Mat::zeros(src.size(), CV_32F), Mat::zeros(src.size(), CV_32F) };
 
+    for (int i = 0; i < src.cols; i++)
+    {
+        for (int j = 0; j < src.rows; j++)
+        {      
+            Fuv = (sqrt(2*M_PI) / 2.0) * alpha * exp(-pow(sqrt(pow(i, 2) + pow(j, 2)) - F, 2) / (2*pow(alpha, 2)));
+            g.at<float>(Point(i, j)) = (1.0 / (2*M_PI*pow(sigma, 2))) * exp(-(pow(i, 2) + pow(j, 2)) / (2*pow(sigma, 2)));
+            const std::complex<float> temp(0, 2*M_PI*Fuv*sqrt(pow(i, 2) + pow(j, 2)));           
+            std::complex<float> Gxy(0, 0);
+
+            Gxy = g.at<float>(Point(i, j)) * exp(temp);
+            G[0].at<float>(Point(i, j)) = Gxy.real();
+            G[1].at<float>(Point(i, j)) = Gxy.imag();
+        }      
+    }
+
+    normalize(G[0], G[0], 0, 1, NORM_MINMAX);
+    G[0].convertTo(G[0], CV_8U, 255);
+    normalize(G[1], G[1], 0, 1, NORM_MINMAX);
+    G[1].convertTo(G[1], CV_8U, 255);
+    
+    imshow("CGF re", G[0]);
+    imshow("CGF im", G[1]);
+}
 
 Mat DFTModule(Mat src[], bool shift)
 {
