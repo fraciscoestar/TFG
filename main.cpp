@@ -18,9 +18,9 @@ void CGF(Mat &src, Mat &dst, float F, float sigma, float theta);
 
 int main(int argc, char const *argv[])
 {
-    Mat img, img2, img3, img4;
+    Mat img, img2, img3, img4, img5, img6, img7, img8, img9;
     int gamma_ = 10;
-    int F = 10, sigma = 30, theta = 0, lambda = 100;
+    int F = 10, sigma = 32, theta = 0, lambda = 115;
 
     namedWindow("Gamma bar");
     createTrackbar("Gamma", "Gamma bar", &gamma_, 1000);
@@ -53,19 +53,61 @@ int main(int argc, char const *argv[])
     digitalWrite(5, LOW);
     ///////////////////////////////////
 
+    // Umbralizar /////////////////////
+    threshold(img2, img3, 60, 255, THRESH_BINARY);
+
+    Mat framed = Mat::zeros(Size2d(img3.cols + 2, img3.rows + 2), CV_8U);
+    Rect r = Rect2d(1, 1, img3.cols, img3.rows);
+    img3.copyTo(framed(r));
+
+    Canny(framed, img4, 10, 50);
+    
+    Mat kernel = getStructuringElement(MORPH_RECT, Size2d(5,5));
+    dilate(img4, img4, kernel);
+
+    vector<vector<Point>> contours;
+    findContours(img4, contours, RETR_TREE, CHAIN_APPROX_NONE);
+
+    Mat contoursImg = Mat::zeros(img4.size(), CV_8U);
+    double maxArea = 0;
+    int mIdx = -1;
+    for (int i = 0; i < contours.size(); i++)
+    {
+        double area = contourArea(contours[i]);
+        if(area > maxArea)
+        {
+            maxArea = area;
+            mIdx = i;
+        }
+    }
+
+    if(mIdx >= 0)
+        drawContours(contoursImg, contours, mIdx, Scalar::all(255), FILLED);
+
+    imshow("Contour", contoursImg);
+
+    bitwise_and(img2, img2, img5, contoursImg(r));
+
+    imshow("Umbralized", img5);
+    
+    ///////////////////////////////////
+
     // CLAHE //////////////////////////
     Ptr<CLAHE> clahe = createCLAHE();
     clahe->setClipLimit(4);
 
-    clahe->apply(img2, img2);
+    clahe->apply(img5, img5);
     ///////////////////////////////////
 
     // HPF ////////////////////////////
-    HPF(img2, img3, FILTER_HPF);
+    HPF(img5, img6, FILTER_HPF);
+    resize(img6, img7, img5.size());
+    bitwise_and(img7, img7, img8, contoursImg(r));
+    clahe->apply(img8, img8);
     ///////////////////////////////////
 
-    imshow("CLAHE", img2);
-    imshow("HPF", img3);
+    imshow("CLAHE", img5);
+    imshow("HPF", img8);
 
     
 
@@ -73,10 +115,10 @@ int main(int argc, char const *argv[])
     {
         //CGF(img3, img, F/10.0, sigma/10.0, 0);
         Mat kernel = getGaborKernel(Size2d(21, 21), sigma/10.0, theta/100.0, lambda/100.0, gamma_/10.0);
-        filter2D(img3, img4, CV_8U, kernel);
+        filter2D(img8, img9, CV_8U, kernel);
 
-        imshow("Gabor filter", img4);
-        imshow("kernel", kernel);
+        imshow("Gabor filter", img9);
+        imshow("Kernel", kernel);
         waitKey(1);
     }
     return 0;
