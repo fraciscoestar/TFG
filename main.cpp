@@ -2,6 +2,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/xfeatures2d.hpp>
 #include <wiringPi.h>
 
 #define FILTER_HPF 0
@@ -18,7 +19,7 @@ void CGF(Mat &src, Mat &dst, float F, float sigma, float theta);
 
 int main(int argc, char const *argv[])
 {
-    Mat img, img2, img3, img4, img5, img6, img7, img8, img9;
+    Mat img, img2, img3, img4, img5, img6, img7, img8, img9, img10;
     int gamma_ = 10;
     int F = 10, sigma = 32, theta = 0, lambda = 115;
 
@@ -109,18 +110,41 @@ int main(int argc, char const *argv[])
     imshow("CLAHE", img5);
     imshow("HPF", img8);
 
-    
-
-    while(1)
+    /*while(1)
     {
         //CGF(img3, img, F/10.0, sigma/10.0, 0);
         Mat kernel = getGaborKernel(Size2d(21, 21), sigma/10.0, theta/100.0, lambda/100.0, gamma_/10.0);
         filter2D(img8, img9, CV_8U, kernel);
 
         imshow("Gabor filter", img9);
-        imshow("Kernel", kernel);
         waitKey(1);
-    }
+    }*/
+
+    Mat gKernel = getGaborKernel(Size2d(21, 21), sigma/10.0, theta/100.0, lambda/100.0, gamma_/10.0);
+    filter2D(img8, img9, CV_8U, gKernel);
+
+    imshow("Gabor filter", img9);
+
+    Ptr<xfeatures2d::SURF> detector = xfeatures2d::SURF::create(5000);
+    vector<KeyPoint> keypoints;
+    Mat descriptors;
+    
+    detector->detectAndCompute(img8, contoursImg(r), keypoints, descriptors);
+
+    cout << keypoints.size() << endl;
+    drawKeypoints(img8, keypoints, img10, Scalar(255,0,0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+    imshow("keypoints", img10);
+    imshow("descr", descriptors);
+
+    waitKey(0);
+    detector->detectAndCompute(img9, contoursImg(r), keypoints, descriptors);
+
+    cout << keypoints.size() << endl;
+    drawKeypoints(img9, keypoints, img10, Scalar(255,0,0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+    imshow("keypoints", img10);
+    imshow("descr", descriptors);
+
+    waitKey(0);
     return 0;
 }
  
