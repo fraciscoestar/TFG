@@ -19,7 +19,7 @@ void CGF(Mat &src, Mat &dst);
 
 int main(int argc, char const *argv[])
 {
-    Mat img, img2, img3, img4, img5, img6, img7, img8, img9, img10;
+    Mat img, img2, img3, img4, img5, img6, img7, img8, img9, img10, img11;
     
     // Activate Lights ////////////////
     wiringPiSetup();
@@ -76,17 +76,12 @@ int main(int argc, char const *argv[])
     if(mIdx >= 0)
         drawContours(contoursImg, contours, mIdx, Scalar::all(255), FILLED);
 
-    imshow("Contour", contoursImg);
-
-    bitwise_and(img2, img2, img5, contoursImg(r));
-
-    imshow("Umbralized", img5);
-    
+    bitwise_and(img2, img2, img5, contoursImg(r));  
     ///////////////////////////////////
 
     // CLAHE //////////////////////////
     Ptr<CLAHE> clahe = createCLAHE();
-    clahe->setClipLimit(4);
+    clahe->setClipLimit(6);
 
     clahe->apply(img5, img5);
     ///////////////////////////////////
@@ -104,23 +99,35 @@ int main(int argc, char const *argv[])
     Mat mask;
     bitwise_not(contoursImg(r), mask);
     normalize(img10, img10, 1.0, 0.0, 4, -1, mask); 
+    img10.convertTo(img10, CV_8U);
+    threshold(img10, img10, 0, 255, THRESH_BINARY);
+
+    kernel = getStructuringElement(MORPH_ELLIPSE, Size(5,5));
+    dilate(img10, img10, kernel);
+    erode(img10, img10, kernel);
+
+    kernel = getStructuringElement(MORPH_ELLIPSE, Size(3,3));
+    erode(img10, img10, kernel);
+    dilate(img10, img10, kernel);
+    ///////////////////////////////////
+
+    // SURF ///////////////////////////
+    Ptr<xfeatures2d::SURF> detector = xfeatures2d::SURF::create(60000);
+    vector<KeyPoint> keypoints;
+    Mat surfMask = Mat::zeros(img10.size(), CV_8U);
+    Rect surfROI = Rect2d(23, 35, img10.cols-75, img10.rows -35 -70);
+    surfMask(surfROI).setTo(255);
+    bitwise_and(img10, surfMask, img10);
+
+    detector->detect(img10(surfROI), keypoints);
+    
+    drawKeypoints(img10(surfROI), keypoints, img11, Scalar(255, 100, 0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
     ///////////////////////////////////
 
     imshow("CLAHE", img5);
     imshow("HFE+HPF", img9);
     imshow("CGF", img10);
-
-
-    // Ptr<xfeatures2d::SURF> detector = xfeatures2d::SURF::create(5000);
-    // vector<KeyPoint> keypoints;
-    // Mat descriptors;
-    
-    // detector->detectAndCompute(img8, contoursImg(r), keypoints, descriptors);
-
-    // cout << keypoints.size() << endl;
-    // drawKeypoints(img8, keypoints, img10, Scalar(255,0,0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    // imshow("keypoints", img10);
-    // imshow("descr", descriptors);
+    imshow("keypoints", img11);
 
     waitKey(0);
     return 0;
