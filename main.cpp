@@ -3,7 +3,6 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/xfeatures2d.hpp>
-#include <wiringPi.h>
 
 #define FILTER_HPF 0
 #define FILTER_HFE 1
@@ -15,43 +14,36 @@ void HPF(Mat& src, Mat& dst, uint8_t filterType);
 void FFTShift(const Mat& src, Mat &dst);
 void test();
 Mat DFTModule(Mat src[], bool shift);
-void CGF(Mat &src, Mat &dst, float F, float sigma, float theta);
+void CGF(Mat &src, Mat &dst);
+
+int d0hfe = 10, d0hpf = 40, k1hfe = 5300, k2hfe = 7327, k1hpf = 3050, k2hpf = 5463, sig = 5, dF=436;
 
 int main(int argc, char const *argv[])
 {
     Mat img, img2, img3, img4, img5, img6, img7, img8, img9, img10;
     int gamma_ = 10;
-    int F = 10, sigma = 32, theta = 0, lambda = 115;
+    
+
+    // float D0 = 40.0f;
+    // float k1 = filterType ? 0.5f : -4;
+    // float k2 = filterType ? 0.75f : 10.9;
 
     namedWindow("Gamma bar");
-    createTrackbar("Gamma", "Gamma bar", &gamma_, 1000);
-    createTrackbar("F", "Gamma bar", &F, 100);
-    createTrackbar("Sigma", "Gamma bar", &sigma, 100);
-    createTrackbar("Theta", "Gamma bar", &theta, 1000);
-    createTrackbar("Lambda", "Gamma bar", &lambda, 1000);
-    
-    // Activate Lights ////////////////
-    wiringPiSetup();
-    pinMode(4, OUTPUT);
-    pinMode(5, OUTPUT);
-
-    digitalWrite(4, HIGH); //980nm
-    digitalWrite(5, HIGH); //850nm
-    ///////////////////////////////////
+    createTrackbar("D0 HFE", "Gamma bar", &d0hfe, 1000);
+    createTrackbar("k1 HFE", "Gamma bar", &k1hfe, 10000);
+    createTrackbar("k2 HFE", "Gamma bar", &k2hfe, 10000);
+    createTrackbar("D0 HPF", "Gamma bar", &d0hpf, 1000);
+    createTrackbar("k1 HPF", "Gamma bar", &k1hpf, 10000);
+    createTrackbar("k2 HPF", "Gamma bar", &k2hpf, 10000);
+    createTrackbar("Sigma", "Gamma bar", &sig, 100);
+    createTrackbar("DeltaF", "Gamma bar", &dF, 1000);
 
     // Take image /////////////////////
     // img = imread("Lenna.png", IMREAD_GRAYSCALE);
-    VideoCapture vc(0);
-    vc.read(img);
+    img = imread("original.png");
     cvtColor(img, img, COLOR_BGR2GRAY);
-    Rect fingerRegion = Rect(255, 0, 465-255, img.rows-40);
-    img2 = img(fingerRegion);
+    img2 = img.clone();
     imshow("Img", img2);
-    ///////////////////////////////////
-
-    // Deactivate Lights //////////////
-    digitalWrite(4, LOW);
-    digitalWrite(5, LOW);
     ///////////////////////////////////
 
     // Umbralizar /////////////////////
@@ -85,31 +77,73 @@ int main(int argc, char const *argv[])
     if(mIdx >= 0)
         drawContours(contoursImg, contours, mIdx, Scalar::all(255), FILLED);
 
-    imshow("Contour", contoursImg);
 
-    bitwise_and(img2, img2, img5, contoursImg(r));
-
-    imshow("Umbralized", img5);
-    
+    bitwise_and(img2, img2, img5, contoursImg(r));    
     ///////////////////////////////////
 
     // CLAHE //////////////////////////
     Ptr<CLAHE> clahe = createCLAHE();
-    clahe->setClipLimit(4);
+    clahe->setClipLimit(6);
 
     clahe->apply(img5, img5);
-    ///////////////////////////////////
-
-    // HPF ////////////////////////////
-    HPF(img5, img6, FILTER_HPF);
-    resize(img6, img7, img5.size());
-    bitwise_and(img7, img7, img8, contoursImg(r));
-    clahe->apply(img8, img8);
-    ///////////////////////////////////
-
     imshow("CLAHE", img5);
-    imshow("HPF", img8);
+    ///////////////////////////////////
 
+    Mat imga, imgb, imgc, imgd, imge;
+
+    while (1)
+    {
+        // HFE + HPF //////////////////////
+        HPF(img5, img6, FILTER_HFE);
+        HPF(img6, img7, FILTER_HPF);
+        resize(img7, img8, img5.size());
+        bitwise_and(img8, img8, imgd, contoursImg(r));
+        clahe->apply(imgd, imgd);
+        imshow("HFE + HPF", imgd);
+        ///////////////////////////////////   
+
+        // CGF ////////////////////////////
+        CGF(imgd, imge);
+        Mat mask;
+        bitwise_not(contoursImg(r), mask);
+        normalize(imge, imge, 1.0, 0.0, 4, -1, mask);
+        imge.convertTo(imge, CV_8U);
+        threshold(imge, imge, 0, 255, THRESH_BINARY);
+        
+        kernel = getStructuringElement(MORPH_ELLIPSE, Size(5,5));
+        dilate(imge, imge, kernel);
+        erode(imge, imge, kernel);
+
+        kernel = getStructuringElement(MORPH_ELLIPSE, Size(3,3));
+        erode(imge, imge, kernel);
+        dilate(imge, imge, kernel);
+        
+        imshow("gabor filtered", imge);   
+        /////////////////////////////////// 
+
+        
+
+        Ptr<xfeatures2d::SURF> detector = xfeatures2d::SURF::create(60000);
+
+        vector<KeyPoint> keypoints;
+        Mat descriptors;
+        Mat surfmask = Mat::zeros(imge.size(), CV_8U);
+        Rect surfROI = Rect2d(23, 35, imge.cols-75, imge.rows - 35 - 70);
+        surfmask(surfROI).setTo(255);
+        bitwise_and(imge, surfmask, imge);
+        detector->detect(imge(surfROI), keypoints);
+        // detector->detectAndCompute(imge, surfmask, keypoints, descriptors);
+        // std::cout << keypoints.size() << std::endl;
+
+        Mat imgf;
+        drawKeypoints(imge(surfROI), keypoints, imgf, Scalar(255, 100, 0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+        imshow("keypoints", imgf);
+
+        waitKey(1);
+    }
+    
+    
+    
     /*while(1)
     {
         //CGF(img3, img, F/10.0, sigma/10.0, 0);
@@ -120,63 +154,41 @@ int main(int argc, char const *argv[])
         waitKey(1);
     }*/
 
-    Mat gKernel = getGaborKernel(Size2d(21, 21), sigma/10.0, theta/100.0, lambda/100.0, gamma_/10.0);
-    filter2D(img8, img9, CV_8U, gKernel);
+    // Mat gKernel = getGaborKernel(Size2d(21, 21), sigma/10.0, theta/100.0, lambda/100.0, gamma_/10.0);
+    // filter2D(img8, img9, CV_8U, gKernel);
 
-    imshow("Gabor filter", img9);
-
-    Ptr<xfeatures2d::SURF> detector = xfeatures2d::SURF::create(5000);
-    vector<KeyPoint> keypoints;
-    Mat descriptors;
-    
-    detector->detectAndCompute(img8, contoursImg(r), keypoints, descriptors);
-
-    cout << keypoints.size() << endl;
-    drawKeypoints(img8, keypoints, img10, Scalar(255,0,0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    imshow("keypoints", img10);
-    imshow("descr", descriptors);
-
-    waitKey(0);
-    detector->detectAndCompute(img9, contoursImg(r), keypoints, descriptors);
-
-    cout << keypoints.size() << endl;
-    drawKeypoints(img9, keypoints, img10, Scalar(255,0,0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    imshow("keypoints", img10);
-    imshow("descr", descriptors);
+    // imshow("Gabor filter", img9);
 
     waitKey(0);
     return 0;
 }
  
-void CGF(Mat &src, Mat &dst, float F, float sigma, float theta)
+void CGF(Mat &src, Mat &dst)
 {
-    float alpha = 1.0 / (2*M_PI*sigma);
-    float Fuv;
-    Mat g = Mat::zeros(src.size(), CV_32F);
-    Mat G[] = { Mat::zeros(src.size(), CV_32F), Mat::zeros(src.size(), CV_32F) };
+    float sigma = 5; //5-pixel width
+    float DeltaF = 1.12; //[0.5, 2,5]
 
-    for (int i = 0; i < src.cols; i++)
+    sigma = sig;
+    DeltaF = dF/100.0f;
+
+    float fc = ((1/M_PI)*sqrt(log(2)/2)*((pow(2, DeltaF) + 1)/(pow(2, DeltaF) - 1)))/sigma;
+
+    Mat g = Mat::zeros(Size2d(30, 30), CV_32F);
+    Mat G = Mat::zeros(Size2d(30, 30), CV_32F);
+    Mat Gim = Mat::zeros(Size2d(30, 30), CV_32F);
+    for (int i = 0; i < g.cols; i++)
     {
-        for (int j = 0; j < src.rows; j++)
-        {      
-            Fuv = (sqrt(2*M_PI) / 2.0) * alpha * exp(-pow(sqrt(pow(i, 2) + pow(j, 2)) - F, 2) / (2*pow(alpha, 2)));
-            g.at<float>(Point(i, j)) = (1.0 / (2*M_PI*pow(sigma, 2))) * exp(-(pow(i, 2) + pow(j, 2)) / (2*pow(sigma, 2)));
-            const std::complex<float> temp(0, 2*M_PI*Fuv*sqrt(pow(i, 2) + pow(j, 2)));           
-            std::complex<float> Gxy(0, 0);
-
-            Gxy = g.at<float>(Point(i, j)) * exp(temp);
-            G[0].at<float>(Point(i, j)) = Gxy.real();
-            G[1].at<float>(Point(i, j)) = Gxy.imag();
-        }      
+        for (int j = 0; j < g.rows; j++)
+        {
+            g.at<float>(Point(i,j)) = (1/(2*M_PI*pow(sigma, 2))) * exp(-(pow(i - g.cols / 2, 2) + pow(j - g.rows / 2, 2))/(2*pow(sigma, 2)));
+            G.at<float>(Point(i,j)) = g.at<float>(Point(i,j)) * cos(2*M_PI*fc*sqrt(pow(i - g.cols / 2, 2) + pow(j - g.rows / 2, 2)));
+            Gim.at<float>(Point(i,j)) = g.at<float>(Point(i,j)) * sin(2*M_PI*fc*sqrt(pow(i - g.cols / 2, 2) + pow(j - g.rows / 2, 2)));
+        }        
     }
 
-    normalize(G[0], G[0], 0, 1, NORM_MINMAX);
-    G[0].convertTo(G[0], CV_8U, 255);
-    normalize(G[1], G[1], 0, 1, NORM_MINMAX);
-    G[1].convertTo(G[1], CV_8U, 255);
-    
-    imshow("CGF re", G[0]);
-    imshow("CGF im", G[1]);
+    Mat res;
+    filter2D(src, res, CV_32F, G);
+    dst = res.clone();
 }
 
 Mat DFTModule(Mat src[], bool shift)
@@ -219,9 +231,24 @@ void HPF(Mat& src, Mat& dst, uint8_t filterType)
     Mat filt = Mat::zeros(src.size(), CV_32F);
     Mat HF = complexImg.clone();
 
-    float D0 = 40.0f;
-    float k1 = filterType ? 0.5f : -4;
-    float k2 = filterType ? 0.75f : 10.9;
+    // float D0 = 40.0f;
+    // float k1 = filterType ? 0.5f : -4;
+    // float k2 = filterType ? 0.75f : 10.9;
+    float D0;
+    float k1, k2;
+
+    if(filterType)
+    {
+        D0 = (d0hfe > 0) ? d0hfe : 1;
+        k1 = (k1hfe-5000) / 100.0f;
+        k2 = (k2hfe-5000) / 100.0f;
+    }
+    else
+    {
+        D0 = (d0hpf > 0) ? d0hpf : 1;
+        k1 = (k1hpf-5000) / 1000.0f;
+        k2 = (k2hpf-5000) / 1000.0f;
+    }
 
     // float a = 10.9, b = -4;
     
