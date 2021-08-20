@@ -22,25 +22,18 @@ int d0hfe = 10, d0hpf = 40, k1hfe = 5300, k2hfe = 7327, k1hpf = 3050, k2hpf = 54
 int main(int argc, char const *argv[])
 {
     Mat img, img2, img3, img4, img5, img6, img7, img8, img9, img10;
-    int gamma_ = 10;
-    
 
-    // float D0 = 40.0f;
-    // float k1 = filterType ? 0.5f : -4;
-    // float k2 = filterType ? 0.75f : 10.9;
-
-    namedWindow("Gamma bar");
-    createTrackbar("D0 HFE", "Gamma bar", &d0hfe, 1000);
-    createTrackbar("k1 HFE", "Gamma bar", &k1hfe, 10000);
-    createTrackbar("k2 HFE", "Gamma bar", &k2hfe, 10000);
-    createTrackbar("D0 HPF", "Gamma bar", &d0hpf, 1000);
-    createTrackbar("k1 HPF", "Gamma bar", &k1hpf, 10000);
-    createTrackbar("k2 HPF", "Gamma bar", &k2hpf, 10000);
-    createTrackbar("Sigma", "Gamma bar", &sig, 100);
-    createTrackbar("DeltaF", "Gamma bar", &dF, 1000);
+    namedWindow("Settings");
+    createTrackbar("D0 HFE", "Settings", &d0hfe, 1000);
+    createTrackbar("k1 HFE", "Settings", &k1hfe, 10000);
+    createTrackbar("k2 HFE", "Settings", &k2hfe, 10000);
+    createTrackbar("D0 HPF", "Settings", &d0hpf, 1000);
+    createTrackbar("k1 HPF", "Settings", &k1hpf, 10000);
+    createTrackbar("k2 HPF", "Settings", &k2hpf, 10000);
+    createTrackbar("Sigma", "Settings", &sig, 100);
+    createTrackbar("DeltaF", "Settings", &dF, 1000);
 
     // Take image /////////////////////
-    // img = imread("Lenna.png", IMREAD_GRAYSCALE);
     img = imread("original.png");
     cvtColor(img, img, COLOR_BGR2GRAY);
     img2 = img.clone();
@@ -94,6 +87,31 @@ int main(int argc, char const *argv[])
 
     while (1)
     {
+        // HFE //////////////////////
+        HPF(img5, img6, FILTER_HFE);
+        resize(img6, img8, img5.size());
+        bitwise_and(img8, img8, imga, contoursImg(r));
+        clahe->apply(imga, imga);
+        imshow("HFE", imga);
+        ///////////////////////////////////   
+
+        // HPF //////////////////////
+        HPF(img5, img6, FILTER_HPF);
+        resize(img6, img8, img5.size());
+        bitwise_and(img8, img8, imgb, contoursImg(r));
+        clahe->apply(imgb, imgb);
+        imshow("HPF", imgb);
+        ///////////////////////////////////   
+
+        // HPF + HFE //////////////////////
+        HPF(img5, img6, FILTER_HPF);
+        HPF(img6, img7, FILTER_HFE);        
+        resize(img7, img8, img5.size());
+        bitwise_and(img8, img8, imgc, contoursImg(r));
+        clahe->apply(imgc, imgc);
+        imshow("HPF + HFE", imgc);
+        ///////////////////////////////////   
+
         // HFE + HPF //////////////////////
         HPF(img5, img6, FILTER_HFE);
         HPF(img6, img7, FILTER_HPF);
@@ -323,106 +341,4 @@ void FFTShift(const Mat& src, Mat &dst)
     q2.copyTo(temp);
     q3.copyTo(q2);
     temp.copyTo(q3);
-}
-
-void test()
-{
-    Mat img = imread("Lenna.png", IMREAD_GRAYSCALE);
-    if(img.empty())
-        exit(1);
-
-    Mat padded; // Expande la imagen al tamaño óptimo
-    int m = getOptimalDFTSize(img.rows);
-    int n = getOptimalDFTSize(img.cols); // Añade valores cero en el borde
-    copyMakeBorder(img, padded, 0, m - img.rows, 0, n - img.cols, BORDER_CONSTANT, Scalar::all(0));
-
-    Mat planes[] = { Mat_<float>(padded), Mat::zeros(padded.size(), CV_32F) };
-    Mat complexImg;
-    merge(planes, 2, complexImg); // Añade un plano complejo
-
-    /// DFT
-    dft(complexImg, complexImg);
-    split(complexImg, planes);
-
-    /*magnitude(planes[0], planes[1], planes[0]); // Magnitud = planes[0]
-    Mat magImg = planes[0];
-
-    magImg += Scalar::all(1); // Cambia a escala log
-    log(magImg, magImg); 
-
-    // Recorta el espectro si tiene rows o cols impares
-    magImg = magImg(Rect(0, 0, magImg.cols & -2, magImg.rows & -2));
-
-    //FFT SHift
-    FFTShift(magImg, magImg);
-
-    normalize(magImg, magImg, 0, 1, NORM_MINMAX);
-    //normalize(phasevals, phasevals, 0, 1, NORM_MINMAX);*/
-    Mat magImg = DFTModule(planes, true);
-
-    imshow("Input", img);
-    imshow("Magnitud", magImg);
-    ///
-
-    /// FILTER
-    Mat H = Mat::zeros(magImg.size(), CV_32F);
-    Mat filt = Mat::zeros(magImg.size(), CV_32F);
-    Mat HFE = complexImg.clone();
-
-    float D0 = 40.0f, k1 = 0.5f, k2 = 0.75f;
-    
-    for (int i = 0; i < H.cols; i++)
-    {
-        for (int j = 0; j < H.rows; j++)
-        {
-            H.at<float>(Point(i,j)) = 1.0 - exp( -(pow(i - H.cols / 2, 2) + pow(j - H.rows / 2, 2)) / (2 * pow(D0, 2)) );
-        }
-        
-    }
-
-    filt = k1 + k2*H;
-    imshow("filt", filt);
-
-    FFTShift(HFE, HFE);
-    split(HFE, planes);
-    for (int i = 0; i < H.cols; i++)
-    {
-        for (int j = 0; j < H.rows; j++)
-        {
-            planes[0].at<float>(Point(i,j)) *= filt.at<float>(Point(i,j));
-            planes[1].at<float>(Point(i,j)) *= filt.at<float>(Point(i,j));
-        }
-    } 
-
-    Mat filteredImg;
-    merge(planes, 2, filteredImg);
-
-    FFTShift(filteredImg, filteredImg);
-    imshow("esta", DFTModule(planes, false));
-
-    ///
-
-    // /// IDFT
-    // Mat inverseTransform;
-    // dft(complexImg, inverseTransform, DFT_INVERSE | DFT_REAL_OUTPUT);
-    // normalize(inverseTransform, inverseTransform, 0, 1, NORM_MINMAX);
-    // imshow("Reconstruida", inverseTransform);
-    // ///
-
-    /// IDFT 2
-    Mat inverseTransform2, result;
-    dft(filteredImg, inverseTransform2, DFT_INVERSE | DFT_REAL_OUTPUT);
-    normalize(inverseTransform2, inverseTransform2, 0, 1, NORM_MINMAX);
-    inverseTransform2.convertTo(inverseTransform2, CV_8U, 255);
-    equalizeHist(inverseTransform2, inverseTransform2);
-    imshow("Resultado", inverseTransform2);
-    ///
-
-    split(complexImg, planes);
-    imshow("CI re", planes[0]);
-    imshow("CI im", planes[1]);
-
-    split(filteredImg, planes);
-    imshow("HFE re", planes[0]);
-    imshow("HFE im", planes[1]);
 }
