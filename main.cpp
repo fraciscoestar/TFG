@@ -2,6 +2,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/features2d.hpp>
 #include <opencv2/xfeatures2d.hpp>
 
 #define FILTER_HPF 0
@@ -121,43 +122,56 @@ int main(int argc, char const *argv[])
         imshow("gabor filtered", imge);   
         /////////////////////////////////// 
 
-        
+        Mat surfmask = Mat::zeros(imge.size(), CV_8U);
+        Rect surfROI = Rect2d(22, 35, imge.cols-70, imge.rows - 35 - 70);
+        surfmask(surfROI).setTo(255);
+        bitwise_and(imge, surfmask, imge);
 
+        // SURF ///////////////////////////
         Ptr<xfeatures2d::SURF> detector = xfeatures2d::SURF::create(60000);
 
         vector<KeyPoint> keypoints;
         Mat descriptors;
-        Mat surfmask = Mat::zeros(imge.size(), CV_8U);
-        Rect surfROI = Rect2d(23, 35, imge.cols-75, imge.rows - 35 - 70);
-        surfmask(surfROI).setTo(255);
-        bitwise_and(imge, surfmask, imge);
+        
         detector->detect(imge(surfROI), keypoints);
         // detector->detectAndCompute(imge, surfmask, keypoints, descriptors);
         // std::cout << keypoints.size() << std::endl;
 
         Mat imgf;
         drawKeypoints(imge(surfROI), keypoints, imgf, Scalar(255, 100, 0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-        imshow("keypoints", imgf);
+        imshow("SURF", imgf);
+        ///////////////////////////////////
+
+        // SIFT ///////////////////////////
+        Ptr<SIFT> detector2 = SIFT::create(40);
+
+        vector<KeyPoint> keypoints2;
+        
+        detector2->detect(imge(surfROI), keypoints2);
+        // detector->detectAndCompute(imge, surfmask, keypoints, descriptors);
+        // std::cout << keypoints.size() << std::endl;
+
+        Mat imgg;
+        drawKeypoints(imge(surfROI), keypoints2, imgg, Scalar(255, 100, 0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+        imshow("SIFT", imgg);
+        ///////////////////////////////////
+
+        // ORB ////////////////////////////
+        Ptr<ORB> detector3 = ORB::create(40);
+
+        vector<KeyPoint> keypoints3;
+        
+        detector3->detect(imge(surfROI), keypoints3);
+        // detector->detectAndCompute(imge, surfmask, keypoints, descriptors);
+        // std::cout << keypoints.size() << std::endl;
+
+        Mat imgh;
+        drawKeypoints(imge(surfROI), keypoints3, imgh, Scalar(255, 100, 0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+        imshow("ORB", imgh);
+        ///////////////////////////////////
 
         waitKey(1);
     }
-    
-    
-    
-    /*while(1)
-    {
-        //CGF(img3, img, F/10.0, sigma/10.0, 0);
-        Mat kernel = getGaborKernel(Size2d(21, 21), sigma/10.0, theta/100.0, lambda/100.0, gamma_/10.0);
-        filter2D(img8, img9, CV_8U, kernel);
-
-        imshow("Gabor filter", img9);
-        waitKey(1);
-    }*/
-
-    // Mat gKernel = getGaborKernel(Size2d(21, 21), sigma/10.0, theta/100.0, lambda/100.0, gamma_/10.0);
-    // filter2D(img8, img9, CV_8U, gKernel);
-
-    // imshow("Gabor filter", img9);
 
     waitKey(0);
     return 0;
