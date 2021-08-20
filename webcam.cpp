@@ -14,9 +14,25 @@ int main(int argc, char const *argv[])
 
     while (true)
     {
+        // Activate Lights ////////////////
+        wiringPiSetup();
+        pinMode(4, OUTPUT);
+        pinMode(5, OUTPUT);
+
+        digitalWrite(4, HIGH); //980nm
+        digitalWrite(5, HIGH); //850nm
+        ///////////////////////////////////
+
+        // Take image /////////////////////
         vc.read(img);
         imshow("Img", img);
+        ///////////////////////////////////
 
+        // Deactivate Lights //////////////
+        digitalWrite(4, LOW);
+        digitalWrite(5, LOW);
+        ///////////////////////////////////
+        
         waitKey(1);
     }
 
