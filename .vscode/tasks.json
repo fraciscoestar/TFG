@@ -11,6 +11,7 @@
                 "${fileDirname}/${fileBasenameNoExtension}",
                 "-std=c++17",
                 "`pkg-config", "--cflags", "--libs", "opencv`",
+                "-lsqlite3",
             ],
             "options": {
                 "cwd": "${fileDirname}"

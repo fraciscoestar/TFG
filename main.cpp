@@ -1,9 +1,12 @@
 #include <iostream>
+#include <fstream>
+#include <iterator>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/xfeatures2d.hpp>
+#include "sqlite3.h"
 
 #define FILTER_HPF 0
 #define FILTER_HFE 1
@@ -24,6 +27,8 @@ tuple<vector<KeyPoint>, Mat> ORBDetector(Mat& src);
 tuple<vector<KeyPoint>, Mat> KAZEDetector(Mat& src);
 Mat FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<KeyPoint>, Mat> m2, Mat& imgB);
 Mat BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<KeyPoint>, Mat> m2, Mat& imgB);
+int WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name);
+tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id);
 
 int d0hfe = 10, d0hpf = 40, k1hfe = 5300, k2hfe = 7327, k1hpf = 3050, k2hpf = 5463, sig = 5, dF=436;
 
@@ -37,7 +42,7 @@ int main(int argc, char const *argv[])
     imshow("Img", img);
     imshow("Img2", img2);
     ///////////////////////////////////
-
+    
     // Preprocess /////////////////////
     PreprocessImage(img, imga);
     PreprocessImage(img2, imgb);
@@ -77,7 +82,212 @@ int main(int argc, char const *argv[])
     imshow("KAZE Matches", matchImgKAZE);
     ///////////////////////////////////
 
+    int res = WriteEntry(get<0>(kaze1), get<1>(kaze1), "fran");
+    if (res)
+    {
+        cerr << "An error was encountered:" << endl;
+        if (res == 1)
+            cerr << " > User already registered." << endl;
+    }
+
+    tuple<string, vector<KeyPoint>, Mat> entry = ReadEntry(9);
+
     waitKey(0);
+    return 0;
+}
+
+tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id)
+{
+    sqlite3 *db;
+    int rc = sqlite3_open_v2("database.db", &db, SQLITE_OPEN_READONLY, NULL);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "DB open failed: " << sqlite3_errmsg(db) << endl;
+        throw;
+    }
+
+    sqlite3_stmt* stmt = NULL;
+    string query = "SELECT * FROM data WHERE id='" + to_string(id) + "'";
+
+    rc = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "Prepare failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+    
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW)
+    {
+        char* name = (char*)sqlite3_column_text(stmt, 1);
+
+        int nKeypoints = sqlite3_column_int(stmt, 2);
+        char* keypointsBinary = (char*)sqlite3_column_blob(stmt, 3);
+
+        vector<KeyPoint> keypoints;
+        for (int i = 0; i < nKeypoints; i++)
+        {
+            vector<char> kp(&keypointsBinary[i*sizeof(KeyPoint)], &keypointsBinary[i*sizeof(KeyPoint)] + sizeof(KeyPoint));
+            KeyPoint* kpPtr = reinterpret_cast<KeyPoint*>(&kp[0]);
+            keypoints.push_back(*kpPtr);
+
+            kp.clear();
+            kp.shrink_to_fit();
+        }
+        
+
+        int descriptorSize = sqlite3_column_bytes(stmt, 4);
+        uchar* dPtr = (uchar*)sqlite3_column_blob(stmt, 4);
+        vector<uchar> dData(dPtr, dPtr + descriptorSize);
+        Mat descriptor = imdecode(dData, ImreadModes::IMREAD_UNCHANGED);
+        
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+
+        return make_tuple(name, keypoints, descriptor);
+    }
+    else
+    {
+        cerr << "No entry with id " << id << " was found." << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+}
+
+int WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
+{
+    // First check if user already exists
+    /////////////////////////////////////////
+    sqlite3 *db = NULL;
+    int rc = sqlite3_open_v2("database.db", &db, SQLITE_OPEN_READWRITE, NULL);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "DB open failed: " << sqlite3_errmsg(db) << endl;
+        throw;
+    }
+
+    sqlite3_stmt* stmt = NULL;
+    string query = "SELECT * FROM data";
+
+    rc = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "Prepare failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+    
+    while (true)
+    {
+        rc = sqlite3_step(stmt);
+        if (rc == SQLITE_ROW)
+        {
+            char* name_c_str = (char*)sqlite3_column_text(stmt, 1);
+            string name_str = string(name_c_str);
+
+            if (name_str == name)
+                return 1;
+        }
+        else
+            break;
+    }
+
+    sqlite3_finalize(stmt);
+
+    /////////////////////////////////////////
+    vector<uchar> descriptorBuffer;
+    imencode(".bmp", img, descriptorBuffer);
+    int size = descriptorBuffer.size();
+    /////////////////////////////////////////
+
+    /////////////////////////////////////////
+    int keypointCount = keypoints.size();
+    char* keypointsBuffer = new char[sizeof(KeyPoint)*keypointCount];
+    int keypointsByteCounter = 0;
+    const void* kpptr = NULL;
+    kpptr = keypointsBuffer;
+
+    for (int i = 0; i < keypointCount; i++)
+    {
+        char* kp = reinterpret_cast<char*>(&keypoints[i]);
+        for (int j = 0; j < sizeof(KeyPoint); j++)
+        {
+            keypointsBuffer[keypointsByteCounter] = kp[j];
+            keypointsByteCounter++;
+        }    
+    }   
+    /////////////////////////////////////////
+
+    /////////////////////////////////////////
+    stmt = NULL;
+    query = "INSERT INTO data(id, name, nKeypoints, keypoints, descriptor) VALUES(NULL, ?, ?, ?, ?)";
+
+    rc = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "Prepare failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+
+    rc = sqlite3_bind_text(stmt, 1, name.c_str(), -1, NULL);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "bind text failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+
+    rc = sqlite3_bind_int(stmt, 2, keypointCount);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "bind int failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+
+    rc = sqlite3_bind_blob(stmt, 3, keypointsBuffer, keypointsByteCounter, SQLITE_STATIC);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "bind 1 failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+
+    rc = sqlite3_bind_blob(stmt, 4, &descriptorBuffer[0], size, SQLITE_STATIC);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "Prepare failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+
+    rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE)
+    {
+        cerr << "Execution failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    /////////////////////////////////////////
+
+    descriptorBuffer.clear();
+    descriptorBuffer.shrink_to_fit();
+    delete[] keypointsBuffer;
+
     return 0;
 }
 
@@ -238,11 +448,34 @@ Mat FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<KeyPoi
         }
     }
 
+    float maxInc = 0.34f;
+    std::vector<DMatch> goodest_matches;
+
+    for (size_t i = 0; i < good_matches.size(); i++)
+    {
+        int idx1 = good_matches[i].trainIdx;
+        int idx2 = good_matches[i].queryIdx;
+
+        const KeyPoint &kp1 = get<0>(m2)[idx1], &kp2 = get<0>(m1)[idx2];
+        Point2f p1 = kp1.pt;
+        Point2f p2 = kp2.pt;
+        Point2f triangle = Point2f(std::abs(p2.x - p1.x), std::abs(p2.y - p1.y));
+
+        float angle = std::atan2(triangle.y, triangle.x);
+
+        if (std::abs(angle) < maxInc)
+        {
+            goodest_matches.push_back(good_matches[i]);
+        }
+    }
+    
+
     cout << "Good matches: " << to_string(good_matches.size()) << endl;
+    cout << "Goodest matches: " << to_string(goodest_matches.size()) << endl;
 
     //-- Draw matches
     Mat img_matches;
-    drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), good_matches, img_matches, Scalar::all(-1),
+    drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), goodest_matches, img_matches, Scalar::all(-1),
                  Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
 
     //-- Show detected matches
@@ -266,8 +499,33 @@ Mat BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<K
         }
     }
 
+    float maxInc = 0.34f;
+    std::vector<DMatch> goodest_matches;
+
+    for (size_t i = 0; i < good_matches.size(); i++)
+    {
+        int idx1 = good_matches[i].trainIdx;
+        int idx2 = good_matches[i].queryIdx;
+
+        const KeyPoint &kp1 = get<0>(m2)[idx1], &kp2 = get<0>(m1)[idx2];
+        Point2f p1 = kp1.pt;
+        Point2f p2 = kp2.pt;
+        Point2f triangle = Point2f(std::abs(p2.x - p1.x), std::abs(p2.y - p1.y));
+
+        float angle = std::atan2(triangle.y, triangle.x);
+
+        if (std::abs(angle) < maxInc)
+        {
+            goodest_matches.push_back(good_matches[i]);
+        }
+    }
+    
+
+    cout << "Good matches: " << to_string(good_matches.size()) << endl;
+    cout << "Goodest matches: " << to_string(goodest_matches.size()) << endl;
+
     Mat img_matches;
-    drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), good_matches, img_matches, Scalar::all(-1),
+    drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), goodest_matches, img_matches, Scalar::all(-1),
                  Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
 
     return img_matches.clone();
