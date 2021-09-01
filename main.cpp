@@ -11,6 +11,8 @@
 #define FILTER_HPF 0
 #define FILTER_HFE 1
 
+#define EMPTY_MAT Mat::zeros(Size2d(0,0), CV_8U)
+
 using namespace std;
 using namespace cv;
 
@@ -25,14 +27,45 @@ tuple<vector<KeyPoint>, Mat> SURFDetector(Mat &src);
 tuple<vector<KeyPoint>, Mat> SIFTDetector(Mat& src);
 tuple<vector<KeyPoint>, Mat> ORBDetector(Mat& src);
 tuple<vector<KeyPoint>, Mat> KAZEDetector(Mat& src);
-Mat FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<KeyPoint>, Mat> m2, Mat& imgB);
-Mat BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<KeyPoint>, Mat> m2, Mat& imgB);
-int WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name);
-tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id);
+tuple<Mat, int> FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<KeyPoint>, Mat> m2, Mat imgA = Mat(), Mat imgB = Mat());
+tuple<Mat, int> BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<KeyPoint>, Mat> m2, Mat imgA = Mat(), Mat imgB = Mat());
+void WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name);
+tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db = NULL);
+void TestMatchers();
+tuple<string, vector<KeyPoint>, Mat> FindBestMatch(tuple<vector<KeyPoint>, Mat> features);
 
 int d0hfe = 10, d0hpf = 40, k1hfe = 5300, k2hfe = 7327, k1hpf = 3050, k2hpf = 5463, sig = 5, dF=436;
 
 int main(int argc, char const *argv[])
+{
+    Mat img, img2, imga, imgb, resA, resB;
+    
+    // Take images /////////////////////
+    img = imread("original4.png", ImreadModes::IMREAD_GRAYSCALE);
+    imshow("Img", img);
+    ///////////////////////////////////
+    
+    // Preprocess /////////////////////
+    PreprocessImage(img, imga);
+    ///////////////////////////////////
+
+    // KAZE ///////////////////////////
+    tuple<vector<KeyPoint>, Mat> kaze = KAZEDetector(imga);
+    ///////////////////////////////////
+
+    // Match Features /////////////////
+    // Mat matchImgKAZE = FLANNMatcher(kaze1, imga, kaze2, imgb);
+    // imshow("KAZE Matches", matchImgKAZE);
+    ///////////////////////////////////
+    TestMatchers();
+
+    //tuple<string, vector<KeyPoint>, Mat> bestMatch = FindBestMatch(kaze);
+
+    waitKey(0);
+    return 0;
+}
+
+void TestMatchers()
 {
     Mat img, img2, imga, imgb, resA, resB;
 
@@ -68,35 +101,27 @@ int main(int argc, char const *argv[])
     tuple<vector<KeyPoint>, Mat> kaze2 = KAZEDetector(imgb);
     ///////////////////////////////////
 
+    imshow("descriptor", get<1>(kaze1));
+    //WriteEntry(get<0>(kaze1), get<1>(kaze1), "algo");
+    tuple<string, vector<KeyPoint>, Mat> entry = ReadEntry(16);
+    imshow("descriptor2", get<2>(entry));
+
     // Match Features /////////////////
-    Mat matchImgSURF = FLANNMatcher(surf1, imga, surf2, imgb);
-    imshow("SURF Matches", matchImgSURF);
+    tuple<Mat, int> matchesSURF = FLANNMatcher(surf1, surf2, imga, imgb);
+    imshow("SURF Matches", get<0>(matchesSURF));
 
-    Mat matchImgSIFT = FLANNMatcher(sift1, imga, sift2, imgb);
-    imshow("SIFT Matches", matchImgSIFT);
+    tuple<Mat, int> matchesSIFT = FLANNMatcher(sift1, sift2, imga, imgb);
+    imshow("SIFT Matches", get<0>(matchesSIFT));
 
-    Mat matchImgORB = BruteForceMatcher(orb1, imga, orb2, imgb);
-    imshow("ORB Matches", matchImgORB);
+    tuple<Mat, int> matchesORB = BruteForceMatcher(orb1, orb2, imga, imgb);
+    imshow("ORB Matches", get<0>(matchesORB));
 
-    Mat matchImgKAZE = FLANNMatcher(kaze1, imga, kaze2, imgb);
-    imshow("KAZE Matches", matchImgKAZE);
+    tuple<Mat, int> matchesKAZE = FLANNMatcher(kaze1, kaze2, imga, imgb);
+    imshow("KAZE Matches", get<0>(matchesKAZE));
     ///////////////////////////////////
-
-    int res = WriteEntry(get<0>(kaze1), get<1>(kaze1), "fran");
-    if (res)
-    {
-        cerr << "An error was encountered:" << endl;
-        if (res == 1)
-            cerr << " > User already registered." << endl;
-    }
-
-    tuple<string, vector<KeyPoint>, Mat> entry = ReadEntry(9);
-
-    waitKey(0);
-    return 0;
 }
 
-tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id)
+tuple<string, vector<KeyPoint>, Mat> FindBestMatch(tuple<vector<KeyPoint>, Mat> features)
 {
     sqlite3 *db;
     int rc = sqlite3_open_v2("database.db", &db, SQLITE_OPEN_READONLY, NULL);
@@ -106,6 +131,70 @@ tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id)
         throw;
     }
 
+    sqlite3_stmt* stmt = NULL;
+    string query = "SELECT * FROM data";
+
+    rc = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "Prepare failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+    
+    tuple<string, vector<KeyPoint>, Mat> bestMatch;
+    int maxMatches = 0;
+    while (true)
+    {
+        rc = sqlite3_step(stmt);
+        if (rc == SQLITE_ROW)
+        {
+            int id = sqlite3_column_int(stmt, 0);
+            tuple<string, vector<KeyPoint>, Mat> entry = ReadEntry(id, db);
+
+            // Match Features /////////////////
+            tuple<Mat, int> matchKAZE = FLANNMatcher(features, make_tuple(get<1>(entry), get<2>(entry)));
+            ///////////////////////////////////
+
+            if (get<1>(matchKAZE) > maxMatches)
+            {
+                maxMatches = get<1>(matchKAZE);
+                bestMatch = entry;
+            }
+        }
+        else
+            break;
+    }
+    
+    if (maxMatches > 0) // Match found
+    {
+        cout << maxMatches << " found for user " << get<0>(bestMatch) << endl;
+        return bestMatch;
+    }
+    else
+        throw;
+}
+
+tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db)
+{
+    sqlite3 *db;
+    int rc;
+
+    if (e_db != NULL)
+    {
+        db = e_db;
+    }
+    else
+    {
+        rc = sqlite3_open_v2("database.db", &db, SQLITE_OPEN_READONLY, NULL);
+        if (rc != SQLITE_OK)
+        {
+            cerr << "DB open failed: " << sqlite3_errmsg(db) << endl;
+            throw;
+        }
+    }
+    
     sqlite3_stmt* stmt = NULL;
     string query = "SELECT * FROM data WHERE id='" + to_string(id) + "'";
 
@@ -157,7 +246,7 @@ tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id)
     }
 }
 
-int WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
+void WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
 {
     // First check if user already exists
     /////////////////////////////////////////
@@ -190,7 +279,10 @@ int WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
             string name_str = string(name_c_str);
 
             if (name_str == name)
-                return 1;
+            {
+                cerr << " > User already registered." << endl;
+                throw;       
+            }
         }
         else
             break;
@@ -200,7 +292,7 @@ int WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
 
     /////////////////////////////////////////
     vector<uchar> descriptorBuffer;
-    imencode(".bmp", img, descriptorBuffer);
+    imencode(".png", img, descriptorBuffer, vector<int>(IMWRITE_PNG_STRATEGY_DEFAULT));
     int size = descriptorBuffer.size();
     /////////////////////////////////////////
 
@@ -288,7 +380,7 @@ int WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
     descriptorBuffer.shrink_to_fit();
     delete[] keypointsBuffer;
 
-    return 0;
+    return;
 }
 
 void PreprocessImage(Mat &src, Mat &dst)
@@ -431,13 +523,13 @@ tuple<vector<KeyPoint>, Mat> KAZEDetector(Mat& src)
     ///////////////////////////////////
 }
 
-Mat FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<KeyPoint>, Mat> m2, Mat& imgB)
+tuple<Mat, int> FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<KeyPoint>, Mat> m2, Mat imgA, Mat imgB)
 {
     Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create(DescriptorMatcher::FLANNBASED);
     std::vector< std::vector<DMatch> > knn_matches;
     matcher->knnMatch(get<1>(m1), get<1>(m2), knn_matches, 2);
 
-    //-- Filter matches using the Lowe's ratio test
+    // Filter matches using the Lowe's ratio test.
     const float ratio_thresh = 0.72f;
     std::vector<DMatch> good_matches;
     for (size_t i = 0; i < knn_matches.size(); i++)
@@ -473,16 +565,23 @@ Mat FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<KeyPoi
     cout << "Good matches: " << to_string(good_matches.size()) << endl;
     cout << "Goodest matches: " << to_string(goodest_matches.size()) << endl;
 
-    //-- Draw matches
-    Mat img_matches;
-    drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), goodest_matches, img_matches, Scalar::all(-1),
-                 Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
+    if (imgA.rows > 1 && imgB.rows > 1)
+    {
+        // Draw matches.
+        Mat img_matches;
+        drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), goodest_matches, img_matches, Scalar::all(-1),
+                    Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
 
-    //-- Show detected matches
-    return img_matches.clone();
+        // Return mathes image.
+        return make_tuple(img_matches.clone(), goodest_matches.size());
+    }
+    else
+    {
+        return make_tuple(Mat(), goodest_matches.size());
+    }
 }
 
-Mat BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<KeyPoint>, Mat> m2, Mat& imgB)
+tuple<Mat, int> BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<KeyPoint>, Mat> m2, Mat imgA, Mat imgB)
 {
     Ptr<BFMatcher> matcher = BFMatcher::create(NORM_HAMMING);
     vector<vector<DMatch>> knn_matches;
@@ -524,11 +623,18 @@ Mat BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, Mat& imgA, tuple<vector<K
     cout << "Good matches: " << to_string(good_matches.size()) << endl;
     cout << "Goodest matches: " << to_string(goodest_matches.size()) << endl;
 
-    Mat img_matches;
-    drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), goodest_matches, img_matches, Scalar::all(-1),
-                 Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
+    if (imgA.rows > 1 && imgB.rows > 1)
+    {
+        Mat img_matches;
+        drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), goodest_matches, img_matches, Scalar::all(-1),
+                    Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
 
-    return img_matches.clone();
+        return make_tuple(img_matches.clone(), good_matches.size());
+    }
+    else
+    {
+        return make_tuple(Mat(), good_matches.size());
+    }
 }
 
 void PerformTest(Mat& src, Mat& dst)
