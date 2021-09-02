@@ -29,10 +29,12 @@ tuple<vector<KeyPoint>, Mat> ORBDetector(Mat& src);
 tuple<vector<KeyPoint>, Mat> KAZEDetector(Mat& src);
 tuple<Mat, int> FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<KeyPoint>, Mat> m2, Mat imgA = Mat(), Mat imgB = Mat());
 tuple<Mat, int> BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<KeyPoint>, Mat> m2, Mat imgA = Mat(), Mat imgB = Mat());
-void WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name);
+void WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name);
 tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db = NULL);
 void TestMatchers();
 tuple<string, vector<KeyPoint>, Mat> FindBestMatch(tuple<vector<KeyPoint>, Mat> features);
+char* EncodeF32Image(Mat& img);
+Mat DecodeKazeDescriptor(vector<char> buffer, int nKeypoints);
 
 int d0hfe = 10, d0hpf = 40, k1hfe = 5300, k2hfe = 7327, k1hpf = 3050, k2hpf = 5463, sig = 5, dF=436;
 
@@ -53,13 +55,8 @@ int main(int argc, char const *argv[])
     tuple<vector<KeyPoint>, Mat> kaze = KAZEDetector(imga);
     ///////////////////////////////////
 
-    // Match Features /////////////////
-    // Mat matchImgKAZE = FLANNMatcher(kaze1, imga, kaze2, imgb);
-    // imshow("KAZE Matches", matchImgKAZE);
-    ///////////////////////////////////
-    TestMatchers();
-
-    //tuple<string, vector<KeyPoint>, Mat> bestMatch = FindBestMatch(kaze);
+    //WriteEntry(kaze, "angela");
+    tuple<string, vector<KeyPoint>, Mat> bestMatch = FindBestMatch(kaze);
 
     waitKey(0);
     return 0;
@@ -100,11 +97,6 @@ void TestMatchers()
     tuple<vector<KeyPoint>, Mat> kaze1 = KAZEDetector(imga);
     tuple<vector<KeyPoint>, Mat> kaze2 = KAZEDetector(imgb);
     ///////////////////////////////////
-
-    imshow("descriptor", get<1>(kaze1));
-    //WriteEntry(get<0>(kaze1), get<1>(kaze1), "algo");
-    tuple<string, vector<KeyPoint>, Mat> entry = ReadEntry(16);
-    imshow("descriptor2", get<2>(entry));
 
     // Match Features /////////////////
     tuple<Mat, int> matchesSURF = FLANNMatcher(surf1, surf2, imga, imgb);
@@ -152,6 +144,10 @@ tuple<string, vector<KeyPoint>, Mat> FindBestMatch(tuple<vector<KeyPoint>, Mat> 
         {
             int id = sqlite3_column_int(stmt, 0);
             tuple<string, vector<KeyPoint>, Mat> entry = ReadEntry(id, db);
+
+            // cout << "Name: " << get<0>(entry) << endl;
+            // cout << "Keypoints: " << get<1>(entry).size() << endl;
+            // imshow("Descriptor", get<2>(entry));
 
             // Match Features /////////////////
             tuple<Mat, int> matchKAZE = FLANNMatcher(features, make_tuple(get<1>(entry), get<2>(entry)));
@@ -211,6 +207,7 @@ tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db)
     if (rc == SQLITE_ROW)
     {
         char* name = (char*)sqlite3_column_text(stmt, 1);
+        string name_cpp = string(name);
 
         int nKeypoints = sqlite3_column_int(stmt, 2);
         char* keypointsBinary = (char*)sqlite3_column_blob(stmt, 3);
@@ -225,17 +222,22 @@ tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db)
             kp.clear();
             kp.shrink_to_fit();
         }
-        
 
         int descriptorSize = sqlite3_column_bytes(stmt, 4);
-        uchar* dPtr = (uchar*)sqlite3_column_blob(stmt, 4);
-        vector<uchar> dData(dPtr, dPtr + descriptorSize);
-        Mat descriptor = imdecode(dData, ImreadModes::IMREAD_UNCHANGED);
+        char* dPtr = (char*)sqlite3_column_blob(stmt, 4);
+        vector<char> dData(dPtr, dPtr + descriptorSize);
+        Mat descriptor = DecodeKazeDescriptor(dData, nKeypoints);
         
         sqlite3_finalize(stmt);
         sqlite3_close(db);
 
-        return make_tuple(name, keypoints, descriptor);
+        dData.clear();
+        dData.shrink_to_fit();
+
+        keypointsBinary = NULL;
+        delete[] keypointsBinary;
+
+        return make_tuple(name_cpp, keypoints, descriptor);
     }
     else
     {
@@ -246,7 +248,7 @@ tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db)
     }
 }
 
-void WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
+void WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name)
 {
     // First check if user already exists
     /////////////////////////////////////////
@@ -291,13 +293,11 @@ void WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
     sqlite3_finalize(stmt);
 
     /////////////////////////////////////////
-    vector<uchar> descriptorBuffer;
-    imencode(".png", img, descriptorBuffer, vector<int>(IMWRITE_PNG_STRATEGY_DEFAULT));
-    int size = descriptorBuffer.size();
+    char* descriptorBuffer = EncodeF32Image(get<1>(features));
     /////////////////////////////////////////
 
     /////////////////////////////////////////
-    int keypointCount = keypoints.size();
+    int keypointCount = get<0>(features).size();
     char* keypointsBuffer = new char[sizeof(KeyPoint)*keypointCount];
     int keypointsByteCounter = 0;
     const void* kpptr = NULL;
@@ -305,7 +305,7 @@ void WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
 
     for (int i = 0; i < keypointCount; i++)
     {
-        char* kp = reinterpret_cast<char*>(&keypoints[i]);
+        char* kp = reinterpret_cast<char*>(&get<0>(features)[i]);
         for (int j = 0; j < sizeof(KeyPoint); j++)
         {
             keypointsBuffer[keypointsByteCounter] = kp[j];
@@ -354,7 +354,7 @@ void WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
         throw;
     }
 
-    rc = sqlite3_bind_blob(stmt, 4, &descriptorBuffer[0], size, SQLITE_STATIC);
+    rc = sqlite3_bind_blob(stmt, 4, descriptorBuffer, get<1>(features).rows * get<1>(features).cols * sizeof(float), SQLITE_STATIC);
     if (rc != SQLITE_OK)
     {
         cerr << "Prepare failed: " << sqlite3_errmsg(db) << endl;
@@ -376,11 +376,55 @@ void WriteEntry(vector<KeyPoint> keypoints, Mat& img, string name)
     sqlite3_close(db);
     /////////////////////////////////////////
 
-    descriptorBuffer.clear();
-    descriptorBuffer.shrink_to_fit();
+    free(descriptorBuffer);
     delete[] keypointsBuffer;
 
     return;
+}
+
+char* EncodeF32Image(Mat& img)
+{
+    char* buffer = (char*)malloc(sizeof(float) * img.rows * img.cols);
+    int ptr = 0;
+
+    for (int i = 0; i < img.rows; i++)
+    {
+        for (int j = 0; j < img.cols; j++)
+        {
+            float val = img.at<float>(Point(j, i));
+            char* byteVal = reinterpret_cast<char*>(&val);
+            
+            for (int k = 0; k < sizeof(float); k++, ptr++)
+            {
+                buffer[ptr] = byteVal[k];
+            }          
+        }
+    }
+    
+    return buffer;
+}
+
+Mat DecodeKazeDescriptor(vector<char> buffer, int nKeypoints)
+{
+    int cols = 64;
+    int rows = nKeypoints;
+
+    Mat img = Mat::zeros(Size(cols, rows), CV_32F);
+
+    for (int i = 0; i < rows; i++)
+    {
+        for (int j = 0; j < cols; j++)
+        {
+            vector<char> byteVal(&buffer[(j + i*cols)*sizeof(float)], &buffer[(j + i*cols)*sizeof(float)] + sizeof(float));
+            float* val = reinterpret_cast<float*>(&byteVal[0]);
+
+            img.at<float>(Point(j, i)) = *val;
+            byteVal.clear();
+            byteVal.shrink_to_fit();
+        }       
+    }
+
+    return img;
 }
 
 void PreprocessImage(Mat &src, Mat &dst)
