@@ -29,18 +29,27 @@ tuple<vector<KeyPoint>, Mat> ORBDetector(Mat& src);
 tuple<vector<KeyPoint>, Mat> KAZEDetector(Mat& src);
 tuple<Mat, int> FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<KeyPoint>, Mat> m2, Mat imgA = Mat(), Mat imgB = Mat());
 tuple<Mat, int> BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<KeyPoint>, Mat> m2, Mat imgA = Mat(), Mat imgB = Mat());
-void WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name);
+int WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name);
 tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db = NULL);
 void TestMatchers();
 tuple<string, vector<KeyPoint>, Mat> FindBestMatch(tuple<vector<KeyPoint>, Mat> features);
 char* EncodeF32Image(Mat& img);
 Mat DecodeKazeDescriptor(vector<char> buffer, int nKeypoints);
+void callbackButton(int state, void* userdata);
 
 int d0hfe = 10, d0hpf = 40, k1hfe = 5300, k2hfe = 7327, k1hpf = 3050, k2hpf = 5463, sig = 5, dF=436;
 
 int main(int argc, char const *argv[])
 {
     Mat img, img2, imga, imgb, resA, resB;
+    namedWindow("test", WINDOW_NORMAL);
+
+    string nameb1 = "Login";
+    string nameb2 = "Register";
+    string nameb3 = "Exit";
+    createButton(nameb1, callbackButton, &nameb1, QT_PUSH_BUTTON | QT_NEW_BUTTONBAR, 0);
+    createButton(nameb2, callbackButton, &nameb2, QT_PUSH_BUTTON | QT_NEW_BUTTONBAR, 0);
+    createButton(nameb3, callbackButton, &nameb3, QT_PUSH_BUTTON | QT_NEW_BUTTONBAR, 0);
     
     // Take images /////////////////////
     img = imread("original4.png", ImreadModes::IMREAD_GRAYSCALE);
@@ -60,6 +69,24 @@ int main(int argc, char const *argv[])
 
     waitKey(0);
     return 0;
+}
+
+void callbackButton(int state, void* userdata)
+{
+    string button = *(string*)userdata;
+
+    if (button == "Login")
+    {
+        std::cout << "Login" << std::endl;
+    }
+    else if (button == "Register")
+    {
+        std::cout << "Register" << std::endl;
+    }
+    else if (button == "Exit")
+    {
+        std::cout << "Exit" << std::endl;
+    }
 }
 
 void TestMatchers()
@@ -192,12 +219,21 @@ tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db)
     }
     
     sqlite3_stmt* stmt = NULL;
-    string query = "SELECT * FROM data WHERE id='" + to_string(id) + "'";
+    string query = "SELECT * FROM data WHERE id=?";
 
     rc = sqlite3_prepare_v2(db, query.c_str(), -1, &stmt, NULL);
     if (rc != SQLITE_OK)
     {
         cerr << "Prepare failed: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        throw;
+    }
+
+    rc = sqlite3_bind_int(stmt, 1, id);
+    if (rc != SQLITE_OK)
+    {
+        cerr << "bind int failed: " << sqlite3_errmsg(db) << endl;
         sqlite3_finalize(stmt);
         sqlite3_close(db);
         throw;
@@ -248,7 +284,7 @@ tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db)
     }
 }
 
-void WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name)
+int WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name)
 {
     // First check if user already exists
     /////////////////////////////////////////
@@ -282,8 +318,8 @@ void WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name)
 
             if (name_str == name)
             {
-                cerr << " > User already registered." << endl;
-                throw;       
+                return 1;
+                // cerr << " > User already registered." << endl;
             }
         }
         else
@@ -379,7 +415,7 @@ void WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name)
     free(descriptorBuffer);
     delete[] keypointsBuffer;
 
-    return;
+    return 0;
 }
 
 char* EncodeF32Image(Mat& img)
