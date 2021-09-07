@@ -1,6 +1,9 @@
 #include <iostream>
 #include <fstream>
 #include <iterator>
+#include <mqueue.h>
+#include <signal.h>
+#include <unistd.h>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -10,6 +13,8 @@
 
 #define FILTER_HPF 0
 #define FILTER_HFE 1
+
+#define MINMATCHES 40 
 
 #define EMPTY_MAT Mat::zeros(Size2d(0,0), CV_8U)
 
@@ -22,7 +27,7 @@ void test();
 Mat DFTModule(Mat src[], bool shift);
 void CGF(Mat &src, Mat &dst);
 void PreprocessImage(Mat &src, Mat &dst);
-void PerformTest(Mat &src, Mat &dst);
+void PerformTest(Mat &src);
 tuple<vector<KeyPoint>, Mat> SURFDetector(Mat &src);
 tuple<vector<KeyPoint>, Mat> SIFTDetector(Mat& src);
 tuple<vector<KeyPoint>, Mat> ORBDetector(Mat& src);
@@ -35,58 +40,124 @@ void TestMatchers();
 tuple<string, vector<KeyPoint>, Mat> FindBestMatch(tuple<vector<KeyPoint>, Mat> features);
 char* EncodeF32Image(Mat& img);
 Mat DecodeKazeDescriptor(vector<char> buffer, int nKeypoints);
-void callbackButton(int state, void* userdata);
+bool Register(string username);
+bool Login(string* username);
 
 int d0hfe = 10, d0hpf = 40, k1hfe = 5300, k2hfe = 7327, k1hpf = 3050, k2hpf = 5463, sig = 5, dF=436;
 
+void handler(int signal, siginfo_t* data, void*) { }
+
 int main(int argc, char const *argv[])
 {
-    Mat img, img2, imga, imgb, resA, resB;
-    namedWindow("test", WINDOW_NORMAL);
+    // Signals ////////////////////////
+    struct sigaction sa;
+    siginfo_t info;
+    sigset_t ss;
 
-    string nameb1 = "Login";
-    string nameb2 = "Register";
-    string nameb3 = "Exit";
-    createButton(nameb1, callbackButton, &nameb1, QT_PUSH_BUTTON | QT_NEW_BUTTONBAR, 0);
-    createButton(nameb2, callbackButton, &nameb2, QT_PUSH_BUTTON | QT_NEW_BUTTONBAR, 0);
-    createButton(nameb3, callbackButton, &nameb3, QT_PUSH_BUTTON | QT_NEW_BUTTONBAR, 0);
+    sa.sa_sigaction = handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGRTMIN, &sa, NULL);
+
+    sigemptyset(&ss);
+    sigaddset(&ss, SIGRTMIN);
+    sigprocmask(SIG_BLOCK, &ss, NULL);
+    ///////////////////////////////////
+
+    if (argc > 1)
+    {
+        int action = atoi(argv[1]);
+
+        switch (action)
+        {
+            case 0: // Login
+                if (argc > 2)
+                {
+                    int pid = atoi(argv[2]);
+                    union sigval value;
+                    string username;
+
+                    value.sival_int = (int)Login(&username);
+
+                    if(value.sival_int != 0)
+                    {
+                        value.sival_int = username.length();
+                    }
+
+                    sigqueue(pid, SIGRTMIN, value); // Sends 0 if user is not found in db, size of name if successful. 
+                    sigwaitinfo(&ss, &info);       
+
+                    for (int i = 0; i < value.sival_int; i++) // Send characters of username
+                    {
+                        value.sival_int = (int)username.at(i);
+                        sigqueue(pid, SIGRTMIN, value);
+                        sigwaitinfo(&ss, &info);   
+                    }                   
+
+                    exit(0);
+                }
+                break;
+
+            case 1: // Register
+                if (argc > 3)
+                {
+                    int pid = atoi(argv[2]);
+                    string username = string(argv[3]);
+                    union sigval value;
+
+                    value.sival_int = (int)Register(username);
+                    sigqueue(pid, SIGRTMIN, value); // Sends 0 if user already registered, 1 if successful.   
+                    exit(0);                
+                }
+                break;
+
+            default:
+                break;
+        }
+
+        exit(1);
+    }
+
+    // No arguments -> perform test
+
+    Mat img;
     
     // Take images /////////////////////
     img = imread("original4.png", ImreadModes::IMREAD_GRAYSCALE);
     imshow("Img", img);
     ///////////////////////////////////
-    
-    // Preprocess /////////////////////
-    PreprocessImage(img, imga);
-    ///////////////////////////////////
 
-    // KAZE ///////////////////////////
-    tuple<vector<KeyPoint>, Mat> kaze = KAZEDetector(imga);
-    ///////////////////////////////////
-
-    //WriteEntry(kaze, "angela");
-    tuple<string, vector<KeyPoint>, Mat> bestMatch = FindBestMatch(kaze);
+    PerformTest(img);
 
     waitKey(0);
     return 0;
 }
 
-void callbackButton(int state, void* userdata)
+bool Login(string* username)
 {
-    string button = *(string*)userdata;
+    Mat img, imgPre;
+    img = imread("original4.png", ImreadModes::IMREAD_GRAYSCALE); // Use camera instead
+    PreprocessImage(img, imgPre);
+    tuple<vector<KeyPoint>, Mat> features = KAZEDetector(imgPre);
+    tuple<string, vector<KeyPoint>, Mat> bestMatch = FindBestMatch(features);
 
-    if (button == "Login")
+    if (get<0>(bestMatch) == "")
+        return false;
+    else
     {
-        std::cout << "Login" << std::endl;
+        *username = get<0>(bestMatch);
+        return true;
     }
-    else if (button == "Register")
-    {
-        std::cout << "Register" << std::endl;
-    }
-    else if (button == "Exit")
-    {
-        std::cout << "Exit" << std::endl;
-    }
+}
+
+bool Register(string username)
+{
+    Mat img, imgPre;
+
+    img = imread("original4.png", ImreadModes::IMREAD_GRAYSCALE); // Use camera instead
+    PreprocessImage(img, imgPre);
+    tuple<vector<KeyPoint>, Mat> features = KAZEDetector(imgPre);
+    return !WriteEntry(features, username);
 }
 
 void TestMatchers()
@@ -172,10 +243,6 @@ tuple<string, vector<KeyPoint>, Mat> FindBestMatch(tuple<vector<KeyPoint>, Mat> 
             int id = sqlite3_column_int(stmt, 0);
             tuple<string, vector<KeyPoint>, Mat> entry = ReadEntry(id, db);
 
-            // cout << "Name: " << get<0>(entry) << endl;
-            // cout << "Keypoints: " << get<1>(entry).size() << endl;
-            // imshow("Descriptor", get<2>(entry));
-
             // Match Features /////////////////
             tuple<Mat, int> matchKAZE = FLANNMatcher(features, make_tuple(get<1>(entry), get<2>(entry)));
             ///////////////////////////////////
@@ -190,13 +257,15 @@ tuple<string, vector<KeyPoint>, Mat> FindBestMatch(tuple<vector<KeyPoint>, Mat> 
             break;
     }
     
-    if (maxMatches > 0) // Match found
+    if (maxMatches > MINMATCHES) // Match found
     {
         cout << maxMatches << " found for user " << get<0>(bestMatch) << endl;
         return bestMatch;
     }
     else
-        throw;
+    {
+        return make_tuple(string(""), vector<KeyPoint>(), Mat());
+    }
 }
 
 tuple<string, vector<KeyPoint>, Mat> ReadEntry(int id, sqlite3 *e_db)
@@ -319,7 +388,6 @@ int WriteEntry(tuple<vector<KeyPoint>, Mat> features, string name)
             if (name_str == name)
             {
                 return 1;
-                // cerr << " > User already registered." << endl;
             }
         }
         else
@@ -717,10 +785,11 @@ tuple<Mat, int> BruteForceMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<vector<
     }
 }
 
-void PerformTest(Mat& src, Mat& dst)
+void PerformTest(Mat& src)
 {
     Mat img, img2, img3, img4, img5, img6, img7, img8, img9, img10;
 
+    img2 = src.clone();
     // Umbralizar /////////////////////
     threshold(img2, img3, 60, 255, THRESH_BINARY);
 
@@ -819,53 +888,35 @@ void PerformTest(Mat& src, Mat& dst)
     imshow("gabor filtered", imge);   
     /////////////////////////////////// 
 
-    Mat surfmask = Mat::zeros(imge.size(), CV_8U);
-    Rect surfROI = Rect2d(22, 35, imge.cols-70, imge.rows - 35 - 70);
-    surfmask(surfROI).setTo(255);
-    bitwise_and(imge, surfmask, imge);
-
     // SURF ///////////////////////////
-    Ptr<xfeatures2d::SURF> detector = xfeatures2d::SURF::create(60000);
-
-    vector<KeyPoint> keypoints;
-    Mat descriptors;
-        
-    detector->detect(imge(surfROI), keypoints);
-    // detector->detectAndCompute(imge, surfmask, keypoints, descriptors);
-    // std::cout << keypoints.size() << std::endl;
-
-    Mat imgf;
-    drawKeypoints(imge(surfROI), keypoints, imgf, Scalar(255, 100, 0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    imshow("SURF", imgf);
+    tuple<vector<KeyPoint>, Mat> surf = SURFDetector(imge);
+    Mat surfMat;
+    drawKeypoints(imge, get<0>(surf), surfMat, Scalar::all(-1), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+    imshow("SURF", surfMat);
     ///////////////////////////////////
 
     // SIFT ///////////////////////////
-    Ptr<SIFT> detector2 = SIFT::create(40);
-
-    vector<KeyPoint> keypoints2;
-        
-    detector2->detect(imge(surfROI), keypoints2);
-    // detector->detectAndCompute(imge, surfmask, keypoints, descriptors);
-    // std::cout << keypoints.size() << std::endl;
-
-    Mat imgg;
-    drawKeypoints(imge(surfROI), keypoints2, imgg, Scalar(255, 100, 0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    imshow("SIFT", imgg);
+    tuple<vector<KeyPoint>, Mat> sift = SURFDetector(imge);
+    Mat siftMat;
+    drawKeypoints(imge, get<0>(surf), siftMat, Scalar::all(-1), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+    imshow("SIFT", siftMat);
     ///////////////////////////////////
 
     // ORB ////////////////////////////
-    Ptr<ORB> detector3 = ORB::create(40);
-
-    vector<KeyPoint> keypoints3;
-    
-    detector3->detect(imge(surfROI), keypoints3);
-    // detector->detectAndCompute(imge, surfmask, keypoints, descriptors);
-    // std::cout << keypoints.size() << std::endl;
-
-    Mat imgh;
-    drawKeypoints(imge(surfROI), keypoints3, imgh, Scalar(255, 100, 0), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-    imshow("ORB", imgh);
+    tuple<vector<KeyPoint>, Mat> orb = ORBDetector(imge);
+    Mat orbMat;
+    drawKeypoints(imge, get<0>(surf), orbMat, Scalar::all(-1), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+    imshow("ORB", orbMat);
     ///////////////////////////////////
+
+    // KAZE ///////////////////////////
+    tuple<vector<KeyPoint>, Mat> kaze = KAZEDetector(imge);
+    Mat kazeMat;
+    drawKeypoints(imge, get<0>(surf), kazeMat, Scalar::all(-1), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+    imshow("KAZE", kazeMat);
+    ///////////////////////////////////
+
+    
 }
  
 void CGF(Mat &src, Mat &dst)

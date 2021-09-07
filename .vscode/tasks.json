@@ -12,6 +12,7 @@
                 "-std=c++17",
                 "`pkg-config", "--cflags", "--libs", "opencv`",
                 "-lsqlite3",
+                "-lrt",
             ],
             "options": {
                 "cwd": "${fileDirname}"
