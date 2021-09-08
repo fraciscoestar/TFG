@@ -7,11 +7,13 @@
             "args": [
                 "-g",
                 "${file}",
+                "${fileDirname}/DBHandler.cpp",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}",
                 "-std=c++17",
                 "`pkg-config", "--cflags", "--libs", "opencv4`",
                 "-lwiringPi",
+                "-lsqlite3",
             ],
             "options": {
                 "cwd": "${fileDirname}"
