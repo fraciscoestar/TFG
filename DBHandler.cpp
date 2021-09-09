@@ -383,44 +383,44 @@ tuple<Mat, int> DBHandler::FLANNMatcher(tuple<vector<KeyPoint>, Mat> m1, tuple<v
             }
         }
 
-        float maxInc = 0.34f;
-        std::vector<DMatch> goodest_matches;
+        // float maxInc = 0.34f;
+        // std::vector<DMatch> goodest_matches;
 
-        for (size_t i = 0; i < good_matches.size(); i++)
-        {
-            int idx1 = good_matches[i].trainIdx;
-            int idx2 = good_matches[i].queryIdx;
+        // for (size_t i = 0; i < good_matches.size(); i++)
+        // {
+        //     int idx1 = good_matches[i].trainIdx;
+        //     int idx2 = good_matches[i].queryIdx;
 
-            const KeyPoint &kp1 = get<0>(m2)[idx1], &kp2 = get<0>(m1)[idx2];
-            Point2f p1 = kp1.pt;
-            Point2f p2 = kp2.pt;
-            Point2f triangle = Point2f(std::abs(p2.x - p1.x), std::abs(p2.y - p1.y));
+        //     const KeyPoint &kp1 = get<0>(m2)[idx1], &kp2 = get<0>(m1)[idx2];
+        //     Point2f p1 = kp1.pt;
+        //     Point2f p2 = kp2.pt;
+        //     Point2f triangle = Point2f(std::abs(p2.x - p1.x), std::abs(p2.y - p1.y));
 
-            float angle = std::atan2(triangle.y, triangle.x);
+        //     float angle = std::atan2(triangle.y, triangle.x);
 
-            if (std::abs(angle) < maxInc)
-            {
-                goodest_matches.push_back(good_matches[i]);
-            }
-        }
+        //     if (std::abs(angle) < maxInc)
+        //     {
+        //         goodest_matches.push_back(good_matches[i]);
+        //     }
+        // }
         
 
         cout << "Good matches: " << to_string(good_matches.size()) << endl;
-        cout << "Goodest matches: " << to_string(goodest_matches.size()) << endl;
+        //cout << "Goodest matches: " << to_string(goodest_matches.size()) << endl;
 
         if (imgA.rows > 1 && imgB.rows > 1)
         {
             // Draw matches.
             Mat img_matches;
-            drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), goodest_matches, img_matches, Scalar::all(-1),
+            drawMatches(imgA.clone(), get<0>(m1), imgB.clone(), get<0>(m2), good_matches, img_matches, Scalar::all(-1),
                         Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
 
             // Return mathes image.
-            return make_tuple(img_matches.clone(), goodest_matches.size());
+            return make_tuple(img_matches.clone(), good_matches.size());
         }
         else
         {
-            return make_tuple(Mat(), goodest_matches.size());
+            return make_tuple(Mat(), good_matches.size());
         }
     }
 

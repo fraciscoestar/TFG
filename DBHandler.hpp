@@ -12,7 +12,7 @@
 #define FILTER_HPF 0
 #define FILTER_HFE 1
 
-#define MINMATCHES 40 
+#define MINMATCHES 65
 
 using namespace std;
 using namespace cv;
