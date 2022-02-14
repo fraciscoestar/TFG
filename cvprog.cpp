@@ -102,6 +102,7 @@ int main(int argc, char const *argv[])
     Mat img, img2;
     img = TakeImage();
     DBHandler::PreprocessImage(img, img2);
+    imshow("img", img);
     imshow("Vascularity", img2);
 
     waitKey(0);
